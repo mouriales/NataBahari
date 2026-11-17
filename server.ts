@@ -1,8 +1,14 @@
+import 'dotenv/config';
 import fs from 'node:fs';
 import path from 'node:path';
 import crypto from 'node:crypto';
-import express from 'express';
-import { createServer as createViteServer } from 'vite';
+import express, { type NextFunction, type Request, type Response } from 'express';
+import {
+  isProductionEnv,
+  isSecureCookieRequest,
+  resolveServerPort,
+  resolveStorageDir,
+} from './server/config.ts';
 import {
   db,
   getAboutContent,
@@ -34,8 +40,8 @@ import {
 import { injectHtmlMetadata } from './src/utils/seo.ts';
 import type { OgType } from './src/types/foundation.ts';
 
-const PORT = 3000;
-const UPLOADS_DIR = path.resolve(process.cwd(), 'uploads');
+const PORT = resolveServerPort(process.env.PORT, 3000, process.env.NODE_ENV);
+const UPLOADS_DIR = resolveStorageDir('uploads', process.env.UPLOADS_DIR);
 
 if (!fs.existsSync(UPLOADS_DIR)) {
   fs.mkdirSync(UPLOADS_DIR, { recursive: true });
@@ -45,13 +51,20 @@ initializeDatabase();
 
 async function startServer(): Promise<void> {
   const app = express();
+  app.disable('x-powered-by');
+  app.set('trust proxy', 1);
 
   app.use(express.json({ limit: '10mb' }));
-  app.use('/uploads', express.static(UPLOADS_DIR));
+  app.use('/uploads', express.static(UPLOADS_DIR, { maxAge: isProductionEnv(process.env.NODE_ENV) ? '7d' : 0 }));
 
   // Public Health & Site Bootstrap
   app.get('/api/health', (_req, res) => {
-    res.json({ ok: true });
+    try {
+      db.prepare('SELECT 1').get();
+      res.json({ ok: true, env: isProductionEnv(process.env.NODE_ENV) ? 'production' : 'development' });
+    } catch {
+      res.status(503).json({ ok: false, error: 'Database unavailable' });
+    }
   });
 
   app.get('/api/public/site', (_req, res) => {
@@ -124,9 +137,15 @@ async function startServer(): Promise<void> {
     }
 
     const { rawToken } = createSession(admin.id);
+    const secureCookie = isSecureCookieRequest({
+      nodeEnv: process.env.NODE_ENV,
+      secure: req.secure,
+      forwardedProto: req.headers['x-forwarded-proto'],
+    });
     res.cookie(SESSION_COOKIE_NAME, rawToken, {
       httpOnly: true,
       sameSite: 'lax',
+      secure: secureCookie,
       path: '/',
       maxAge: 24 * 60 * 60 * 1000,
     });
@@ -147,7 +166,17 @@ async function startServer(): Promise<void> {
     if (rawToken) {
       deleteSessionByRawToken(rawToken);
     }
-    res.clearCookie(SESSION_COOKIE_NAME, { path: '/' });
+    const secureCookie = isSecureCookieRequest({
+      nodeEnv: process.env.NODE_ENV,
+      secure: req.secure,
+      forwardedProto: req.headers['x-forwarded-proto'],
+    });
+    res.clearCookie(SESSION_COOKIE_NAME, {
+      httpOnly: true,
+      sameSite: 'lax',
+      secure: secureCookie,
+      path: '/',
+    });
     res.json({ ok: true });
   });
 
@@ -455,8 +484,14 @@ async function startServer(): Promise<void> {
     res.json({ metadata: updated });
   });
 
-  // Vite dev middleware or production static assets
-  if (process.env.NODE_ENV !== 'production') {
+  // Return JSON 404 for unknown API routes before SPA fallback
+  app.use('/api', (_req, res) => {
+    res.status(404).json({ error: 'Endpoint API tidak ditemukan.' });
+  });
+
+  // Vite dev middleware (loaded dynamically only outside production) or production static assets
+  if (!isProductionEnv(process.env.NODE_ENV)) {
+    const { createServer: createViteServer } = await import('vite');
     const vite = await createViteServer({
       server: { middlewareMode: true },
       appType: 'spa',
@@ -464,16 +499,54 @@ async function startServer(): Promise<void> {
     app.use(vite.middlewares);
   } else {
     const distDir = path.resolve(process.cwd(), 'dist');
-    app.use(express.static(distDir, { index: false }));
+    const indexHtmlPath = path.join(distDir, 'index.html');
+    if (!fs.existsSync(indexHtmlPath)) {
+      throw new Error('Production build missing (dist/index.html). Run "npm run build" before "npm start".');
+    }
+
+    app.use(express.static(distDir, { index: false, maxAge: '1h' }));
     app.get('*', (_req, res) => {
-      const html = fs.readFileSync(path.join(distDir, 'index.html'), 'utf-8');
+      const html = fs.readFileSync(indexHtmlPath, 'utf-8');
       res.type('html').send(injectHtmlMetadata(html, getSiteMetadata()));
     });
   }
 
-  app.listen(PORT, '0.0.0.0', () => {
-    console.log(`Yayasan Nata Bahari server running at http://localhost:${PORT}`);
+  // Global error handler
+  app.use((err: unknown, _req: Request, res: Response, _next: NextFunction) => {
+    const status =
+      typeof err === 'object' && err !== null && 'status' in err && typeof err.status === 'number'
+        ? err.status
+        : 500;
+    const message =
+      isProductionEnv(process.env.NODE_ENV) && status >= 500
+        ? 'Terjadi kesalahan internal server.'
+        : err instanceof Error
+          ? err.message
+          : 'Permintaan tidak dapat diproses.';
+    res.status(status).json({ error: message });
   });
+
+  const server = app.listen(PORT, '0.0.0.0', () => {
+    console.log(
+      `Yayasan Nata Bahari server running in ${isProductionEnv(process.env.NODE_ENV) ? 'production' : 'development'} mode at http://0.0.0.0:${PORT}`
+    );
+  });
+
+  const shutdown = (signal: string) => {
+    console.log(`Received ${signal}, shutting down gracefully...`);
+    server.close(() => {
+      try {
+        db.close();
+      } catch {
+        // Ignore if already closed
+      }
+      process.exit(0);
+    });
+    setTimeout(() => process.exit(1), 5000).unref();
+  };
+
+  process.on('SIGTERM', () => shutdown('SIGTERM'));
+  process.on('SIGINT', () => shutdown('SIGINT'));
 }
 
 startServer().catch((err) => {

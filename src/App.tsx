@@ -1,14 +1,23 @@
-import { useEffect, useState } from 'react';
+import { Suspense, lazy, useEffect, useState } from 'react';
 import { AboutSummarySection } from './components/AboutSummarySection';
-import { AboutUsPage } from './components/AboutUsPage';
 import { HeroCarousel } from './components/HeroCarousel';
 import { NewsletterSection } from './components/NewsletterSection';
-import { PortfolioFeedPage } from './components/PortfolioFeedPage';
 import { PublicFooter } from './components/PublicFooter';
 import { PublicHeader } from './components/PublicHeader';
 import { GTranslateWidget } from './components/GTranslateWidget';
-import { AdminDashboard } from './components/admin/AdminDashboard';
-import { AdminLoginView } from './components/admin/AdminLoginView';
+
+const PortfolioFeedPage = lazy(() =>
+  import('./components/PortfolioFeedPage').then((m) => ({ default: m.PortfolioFeedPage }))
+);
+const AboutUsPage = lazy(() =>
+  import('./components/AboutUsPage').then((m) => ({ default: m.AboutUsPage }))
+);
+const AdminDashboard = lazy(() =>
+  import('./components/admin/AdminDashboard').then((m) => ({ default: m.AdminDashboard }))
+);
+const AdminLoginView = lazy(() =>
+  import('./components/admin/AdminLoginView').then((m) => ({ default: m.AdminLoginView }))
+);
 import type {
   AboutContent,
   AdminUser,
@@ -139,31 +148,37 @@ export default function App() {
 
   // Isolated Admin Subdomain / Route Gate
   if (isAdminRouteOrSubdomain(currentPath)) {
-    if (!adminUser) {
-      return (
-        <AdminLoginView
-          onSuccess={(user) => setAdminUser(user)}
-          onBackToPublic={() => navigate('/')}
-        />
-      );
-    }
-
     return (
-      <AdminDashboard
-        admin={adminUser}
-        banners={banners}
-        posts={posts}
-        about={about}
-        contacts={contacts}
-        metadata={metadata}
-        onBannersUpdated={setBanners}
-        onPostsUpdated={setPosts}
-        onAboutUpdated={setAbout}
-        onContactsUpdated={setContacts}
-        onMetadataUpdated={setMetadata}
-        onSignedOut={() => setAdminUser(null)}
-        onNavigatePublic={(path) => navigate(path)}
-      />
+      <Suspense
+        fallback={
+          <div className="min-h-screen bg-[#F8F7F3] flex items-center justify-center px-4">
+            <p className="font-serif text-lg text-[#4B5563]">Memuat Portal Admin...</p>
+          </div>
+        }
+      >
+        {!adminUser ? (
+          <AdminLoginView
+            onSuccess={(user) => setAdminUser(user)}
+            onBackToPublic={() => navigate('/')}
+          />
+        ) : (
+          <AdminDashboard
+            admin={adminUser}
+            banners={banners}
+            posts={posts}
+            about={about}
+            contacts={contacts}
+            metadata={metadata}
+            onBannersUpdated={setBanners}
+            onPostsUpdated={setPosts}
+            onAboutUpdated={setAbout}
+            onContactsUpdated={setContacts}
+            onMetadataUpdated={setMetadata}
+            onSignedOut={() => setAdminUser(null)}
+            onNavigatePublic={(path) => navigate(path)}
+          />
+        )}
+      </Suspense>
     );
   }
 
@@ -178,9 +193,25 @@ export default function App() {
 
       <div className="flex-1">
         {currentPath === '/portfolio' ? (
-          <PortfolioFeedPage posts={posts} />
+          <Suspense
+            fallback={
+              <div className="max-w-5xl mx-auto px-4 sm:px-6 py-16 text-center">
+                <p className="font-serif text-lg text-[#4B5563]">Memuat Portofolio...</p>
+              </div>
+            }
+          >
+            <PortfolioFeedPage posts={posts} />
+          </Suspense>
         ) : currentPath === '/tentang-kita' ? (
-          <AboutUsPage about={about} contacts={contacts} />
+          <Suspense
+            fallback={
+              <div className="max-w-5xl mx-auto px-4 sm:px-6 py-16 text-center">
+                <p className="font-serif text-lg text-[#4B5563]">Memuat Halaman Tentang Kita...</p>
+              </div>
+            }
+          >
+            <AboutUsPage about={about} contacts={contacts} />
+          </Suspense>
         ) : (
           <main>
             <HeroCarousel slides={banners} onNavigate={navigate} />

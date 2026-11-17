@@ -11,8 +11,9 @@ import type {
   SiteMetadata,
   Subscription,
 } from '../src/types/foundation.ts';
+import { resolveStorageDir } from './config.ts';
 
-const DATA_DIR = path.resolve(process.cwd(), 'data');
+const DATA_DIR = resolveStorageDir('data', process.env.DATA_DIR);
 const DB_PATH = path.join(DATA_DIR, 'nata_bahari.db');
 
 if (!fs.existsSync(DATA_DIR)) {

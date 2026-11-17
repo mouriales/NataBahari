@@ -276,3 +276,37 @@ test('buildGTranslateSettings returns valid lc.js settings object', () => {
   assert.ok(settings.languages.includes('en'));
 });
 
+import {
+  isProductionEnv,
+  isSecureCookieRequest,
+  resolveServerPort,
+  resolveStorageDir,
+} from '../../server/config';
+
+test('server config resolves PORT, storage paths, and proxy-aware secure cookies safely', () => {
+  assert.equal(resolveServerPort(undefined, 3000, 'production'), 3000);
+  assert.equal(resolveServerPort('8080', 3000, 'production'), 8080);
+  assert.equal(resolveServerPort('8080', 3000, 'development'), 3000);
+  assert.equal(resolveServerPort('not-a-port', 3000, 'production'), 3000);
+  assert.equal(resolveServerPort('99999', 3000, 'production'), 3000);
+
+  assert.equal(isProductionEnv('production'), true);
+  assert.equal(isProductionEnv('development'), false);
+
+  assert.equal(resolveStorageDir('data', undefined, '/app'), '/app/data');
+  assert.equal(resolveStorageDir('data', '/var/lib/nata-bahari', '/app'), '/var/lib/nata-bahari');
+
+  assert.equal(
+    isSecureCookieRequest({ nodeEnv: 'development', secure: true, forwardedProto: 'https' }),
+    false
+  );
+  assert.equal(
+    isSecureCookieRequest({ nodeEnv: 'production', secure: false, forwardedProto: 'https' }),
+    true
+  );
+  assert.equal(
+    isSecureCookieRequest({ nodeEnv: 'production', secure: false, forwardedProto: 'http' }),
+    false
+  );
+});
+
