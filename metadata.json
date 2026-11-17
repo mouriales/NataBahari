@@ -1,0 +1,6 @@
+{
+  "name": "Yayasan Nata Bahari",
+  "description": "Official profile, coastal conservation portfolio, and content management portal for Yayasan Nata Bahari.",
+  "requestFramePermissions": [],
+  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
+}
